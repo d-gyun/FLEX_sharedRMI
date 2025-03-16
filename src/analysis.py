@@ -17,11 +17,14 @@ def report_tree_structure(index_name, rmi, data_node_class):
     print(f"\n[{index_name}] --- RMI Tree Structure ---")
     print(f"Internal Nodes : {internal_node_count}")
     print(f"Data Nodes     : {data_node_count}")
+    if index_name == "FLEX":
+        print(f"Shared Nodes : {len(rmi.shared_nodes)}")
     print("----------------------------------------")
 
     return {
         "internal_nodes": internal_node_count,
-        "data_nodes": data_node_count
+        "data_nodes": data_node_count,
+        "shared_nodes": len(rmi.shared_nodes) if index_name == "FLEX" else None
     }
 
 
