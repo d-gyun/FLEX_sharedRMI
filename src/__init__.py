@@ -8,7 +8,7 @@ def load_dataset(file_path):
 
 def main():
     # 데이터 로드
-    data_file = "../datasets/dataset_LOGNORMAL_100000.csv"
+    data_file = "../datasets/dataset_LOGNORMAL_1000000.csv"
     insert_file = "../datasets/dataset_LOGNORMAL_10000.csv"
 
     initial_data = load_dataset(data_file)

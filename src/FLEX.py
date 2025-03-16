@@ -70,8 +70,15 @@ class InternalNode:
         child_idx = max(0, min(child_idx, len(self.children) - 1))
         return self.children[child_idx]
 
+    @property
+    def keys(self):
+        all_keys = []
+        for child in self.children:
+            all_keys.extend(child.keys)
+        return sorted(all_keys)
+
 # -----------------------------
-# FLEX Recursive Model Index with Shared RMI
+# FLEX Recursive Model Index with Shared RMI (BFS Implementation)
 # -----------------------------
 class FLEX_RMI:
     def __init__(self):
@@ -81,68 +88,77 @@ class FLEX_RMI:
 
     def build(self, data, min_partition_size=32):
         sorted_data = sorted(data)
-        self.root = self._build_recursive([sorted_data], min_partition_size)
+        queue = [(sorted_data, None)]
+        parents_without_parent = []
 
-    def _build_recursive(self, partitions, min_partition_size):
-        parent_nodes = []
-        child_partitions = []
+        while queue:
+            current_level = queue
+            queue = []
+            current_nodes = []
+            parent_to_children = {}
 
-        for keys in partitions:
-            if len(keys) <= min_partition_size or self.is_linear(keys):
-                node = DataNode(keys)
-                self.data_nodes.append(node)
-                parent_nodes.append(node)
-                continue
+            for partition, parent in current_level:
+                if len(partition) <= min_partition_size or self.is_linear(partition):
+                    node = DataNode(partition)
+                    self.data_nodes.append(node)
+                    current_nodes.append((node, parent))
+                else:
+                    split_points = self.find_split_points(partition)
+                    if not split_points:
+                        node = DataNode(partition)
+                        self.data_nodes.append(node)
+                        current_nodes.append((node, parent))
+                        continue
+                    part_list = self.partition_data(partition, split_points)
+                    if len(part_list) <= 1:
+                        node = DataNode(partition)
+                        self.data_nodes.append(node)
+                        current_nodes.append((node, parent))
+                        continue
+                    internal_node = InternalNode(partition, part_list)
+                    current_nodes.append((internal_node, parent))
+                    for part in part_list:
+                        queue.append((part, internal_node))
 
-            split_points = self.find_split_points(keys)
-            part_list = self.partition_data(keys, split_points)
+            for node, parent in current_nodes:
+                if parent:
+                    if parent not in parent_to_children:
+                        parent_to_children[parent] = []
+                    parent_to_children[parent].append(node)
+                else:
+                    parents_without_parent.append(node)
 
-            if len(part_list) <= 1:
-                node = DataNode(keys)
-                self.data_nodes.append(node)
-                parent_nodes.append(node)
-                continue
+            for parent, children in parent_to_children.items():
+                parent.children = children
+                print(f"[DEBUG] Parent {parent} assigned {len(children)} children")
 
-            internal_node = InternalNode(keys, part_list, [None] * len(part_list))
-            parent_nodes.append(internal_node)
-            child_partitions.append(part_list)
+            internal_nodes = [node for node, _ in current_nodes if isinstance(node, InternalNode)]
+            print(f"[DEBUG] InternalNodes count at this level: {len(internal_nodes)}")
 
-        if not child_partitions:
-            return parent_nodes[0] if len(parent_nodes) == 1 else parent_nodes
+            for i in range(1, len(internal_nodes)):
+                prev_internal = internal_nodes[i - 1]
+                curr_internal = internal_nodes[i]
 
-        flattened_partitions = [part for sublist in child_partitions for part in sublist]
-        children_nodes = self._build_recursive(flattened_partitions, min_partition_size)
+                if not prev_internal.children or not curr_internal.children:
+                    print("[WARNING] One of the internals has no children")
+                    continue
 
-        idx = 0
-        for parent in parent_nodes:
-            if isinstance(parent, InternalNode):
-                child_count = len(parent.partitions)
-                parent.children = children_nodes[idx: idx + child_count]
-                idx += child_count
+                prev_last_child = prev_internal.children[-1]
+                curr_first_child = curr_internal.children[0]
 
-        self._merge_adjacent_nodes(parent_nodes)
+                print(f"[DEBUG] Checking merge between {prev_last_child} and {curr_first_child}")
 
-        return parent_nodes[0] if len(parent_nodes) == 1 else parent_nodes
+                if self.is_cdf_similar(prev_last_child, curr_first_child, threshold=0.1):
+                    shared_node = self.create_shared_node(prev_last_child, curr_first_child)
+                    prev_internal.children[-1] = shared_node
+                    curr_internal.children[0] = shared_node
+                    shared_node.parents.append(prev_internal)
+                    shared_node.parents.append(curr_internal)
 
-    def _merge_adjacent_nodes(self, nodes, threshold=0.1):
-        for i in range(1, len(nodes)):
-            prev_node = nodes[i - 1]
-            curr_node = nodes[i]
-
-            if not isinstance(prev_node, InternalNode) or not isinstance(curr_node, InternalNode):
-                continue
-
-            prev_last_child = prev_node.children[-1] if prev_node.children else None
-            curr_first_child = curr_node.children[0] if curr_node.children else None
-
-            if prev_last_child and curr_first_child and self.is_cdf_similar(prev_last_child, curr_first_child, threshold):
-                shared_node = self.create_shared_node(prev_last_child, curr_first_child)
-
-                prev_node.children[-1] = shared_node
-                curr_node.children[0] = shared_node
-
-                shared_node.parents.append(prev_node)
-                shared_node.parents.append(curr_node)
+        if len(parents_without_parent) == 1:
+            self.root = parents_without_parent[0]
+        else:
+            self.root = InternalNode(sorted_data, [n.keys for n in parents_without_parent], parents_without_parent)
 
     def create_shared_node(self, left_node, right_node, min_partition_size=32):
         shared_keys = sorted(left_node.keys + right_node.keys)
@@ -152,17 +168,17 @@ class FLEX_RMI:
         else:
             split_points = self.find_split_points(shared_keys)
             partitions = self.partition_data(shared_keys, split_points)
-
-            if len(partitions) <= 1:
+            if len(partitions) <= 1 or self.is_linear(shared_keys):
                 shared_node = DataNode(shared_keys, density=0.6)
             else:
-                children = self._build_recursive(partitions, min_partition_size)
+                children = [DataNode(part) for part in partitions]
                 shared_node = InternalNode(shared_keys, partitions, children)
 
         shared_node.shared = True
         shared_node.parents = []
         self.shared_nodes.append(shared_node)
 
+        print(f"[DEBUG] Shared node created with {len(shared_keys)} keys")
         return shared_node
 
     def is_linear(self, keys):
@@ -177,8 +193,8 @@ class FLEX_RMI:
         return np.max(error) < len(keys) * 0.05
 
     def is_cdf_similar(self, node_a, node_b, threshold=0.1):
-        keys_a = node_a.keys if isinstance(node_a, DataNode) else []
-        keys_b = node_b.keys if isinstance(node_b, DataNode) else []
+        keys_a = node_a.keys
+        keys_b = node_b.keys
 
         if not keys_a or not keys_b:
             return False
