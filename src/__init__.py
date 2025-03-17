@@ -32,7 +32,7 @@ def main():
 
     # 실험 2 - Search Cost CDF (전체 데이터 1/10 샘플)
     search_keys = initial_data[np.random.choice(len(initial_data), len(initial_data)//10, replace=False)]
-    benchmark_search_cost_cdf("ALEX", alex, search_keys)
+    # benchmark_search_cost_cdf("ALEX", alex, search_keys)
     # benchmark_search_cost_cdf("FLEX", flex, search_keys)
 
     # 실험 3 - Insert + Split 추적

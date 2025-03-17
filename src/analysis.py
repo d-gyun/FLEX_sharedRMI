@@ -7,25 +7,25 @@ from collections import defaultdict
 # 실험 1: 트리 구조 통계 출력
 # -----------------------------
 def report_tree_structure(index_name, rmi, data_node_class):
-    """
-    트리 구조 출력 - Internal / Data 노드 개수
-    data_node_class: ALEX/FLEX의 DataNode 클래스
-    """
     internal_node_count = _count_internal_nodes(rmi.root, data_node_class)
     data_node_count = len(rmi.data_nodes)
+    tree_depth = get_tree_depth(rmi.root, data_node_class)
 
     print(f"\n[{index_name}] --- RMI Tree Structure ---")
     print(f"Internal Nodes : {internal_node_count}")
     print(f"Data Nodes     : {data_node_count}")
+    print(f"Tree Depth     : {tree_depth}")
     if index_name == "FLEX":
-        print(f"Shared Nodes : {len(rmi.shared_nodes)}")
+        print(f"Shared Nodes   : {len(rmi.shared_nodes)}")
     print("----------------------------------------")
 
     return {
         "internal_nodes": internal_node_count,
         "data_nodes": data_node_count,
+        "tree_depth": tree_depth,
         "shared_nodes": len(rmi.shared_nodes) if index_name == "FLEX" else None
     }
+
 
 
 def _count_internal_nodes(node, data_node_class):
@@ -38,6 +38,17 @@ def _count_internal_nodes(node, data_node_class):
     for child in node.children:
         count += _count_internal_nodes(child, data_node_class)
     return count
+
+# -----------------------------
+# Tree Depth Helper
+# -----------------------------
+def get_tree_depth(node, data_node_class, current_depth=0):
+    if isinstance(node, data_node_class):
+        return current_depth
+    if not node.children:
+        return current_depth
+    return max(get_tree_depth(child, data_node_class, current_depth + 1) for child in node.children)
+
 
 # -----------------------------
 # 실험 2: Search Cost CDF (TotalCost)
