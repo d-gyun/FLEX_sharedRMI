@@ -195,7 +195,7 @@ class FLEX_RMI:
         error = np.abs(predicted - y)
         return np.max(error) < len(keys) * 0.2
 
-    def is_cdf_similar(self, node_a, node_b, threshold=0.1):
+    def is_cdf_similar(self, node_a, node_b, threshold=0.01):
         keys_a = node_a.keys_list
         keys_b = node_b.keys_list
 
@@ -203,12 +203,26 @@ class FLEX_RMI:
             print("[WARNING] One or both nodes have no keys during CDF similarity check")
             return False
 
-        len_sample = min(len(keys_a), len(keys_b), 100)
-        sample_a = np.array(keys_a)[np.linspace(0, len(keys_a) - 1, len_sample, dtype=int)]
-        sample_b = np.array(keys_b)[np.linspace(0, len(keys_b) - 1, len_sample, dtype=int)]
+        def normalize_keys(keys):
+            min_val = keys[0]
+            max_val = keys[-1]
+            if min_val == max_val:
+                return [0.5] * len(keys)
+            return [(k - min_val) / (max_val - min_val) for k in keys]
+
+        norm_keys_a = normalize_keys(keys_a)
+        norm_keys_b = normalize_keys(keys_b)
+
+        len_sample = min(len(norm_keys_a), len(norm_keys_b), 100)
+
+        sample_indices_a = np.linspace(0, len(norm_keys_a) - 1, len_sample, dtype=int)
+        sample_indices_b = np.linspace(0, len(norm_keys_b) - 1, len_sample, dtype=int)
+
+        sample_a = np.array(norm_keys_a)[sample_indices_a]
+        sample_b = np.array(norm_keys_b)[sample_indices_b]
 
         mae = np.mean(np.abs(sample_a - sample_b))
-        print(f"[MERGE TEST] MAE: {mae}, Threshold: {threshold}")
+        print(f"[MERGE TEST] Normalized MAE: {mae}, Threshold: {threshold}")
 
         return mae < threshold
 
