@@ -15,8 +15,10 @@ def report_tree_structure(index_name, rmi, data_node_class):
     print(f"Internal Nodes : {internal_node_count}")
     print(f"Data Nodes     : {data_node_count}")
     print(f"Tree Depth     : {tree_depth}")
+
     if index_name == "FLEX":
         print(f"Shared Nodes   : {len(rmi.shared_nodes)}")
+
     print("----------------------------------------")
 
     return {
@@ -27,27 +29,44 @@ def report_tree_structure(index_name, rmi, data_node_class):
     }
 
 
+def _count_internal_nodes(node, data_node_class, visited=None):
+    if visited is None:
+        visited = set()
 
-def _count_internal_nodes(node, data_node_class):
-    """
-    재귀적으로 InternalNode 개수 카운트
-    """
+    if id(node) in visited:
+        return 0  # DAG 중복 방지
+
+    visited.add(id(node))
+
     if isinstance(node, data_node_class):
         return 0
-    count = 1  # 현재 InternalNode 카운트
+
+    count = 1
     for child in node.children:
-        count += _count_internal_nodes(child, data_node_class)
+        count += _count_internal_nodes(child, data_node_class, visited)
+
     return count
+
 
 # -----------------------------
 # Tree Depth Helper
 # -----------------------------
-def get_tree_depth(node, data_node_class, current_depth=0):
+def get_tree_depth(node, data_node_class, current_depth=0, visited=None):
+    if visited is None:
+        visited = set()
+
+    if id(node) in visited:
+        return current_depth
+
+    visited.add(id(node))
+
     if isinstance(node, data_node_class):
         return current_depth
+
     if not node.children:
         return current_depth
-    return max(get_tree_depth(child, data_node_class, current_depth + 1) for child in node.children)
+
+    return max(get_tree_depth(child, data_node_class, current_depth + 1, visited) for child in node.children)
 
 
 # -----------------------------
