@@ -1,6 +1,5 @@
 import numpy as np
 from sklearn.linear_model import LinearRegression
-import matplotlib.pyplot as plt
 
 # -----------------------------
 # Linear Regression Model
@@ -10,9 +9,8 @@ class LinearModel:
         self.model = LinearRegression()
 
     def train(self, keys, positions):
-        if len(keys) == 0:
-            self.model.coef_ = np.array([0.0])
-            self.model.intercept_ = 0.0
+        if len(keys) == 0 or len(positions) == 0:
+            print("[ERROR] LinearModel.train() received empty data")
             return
         X = np.array(keys).reshape(-1, 1)
         y = np.array(positions)
@@ -44,32 +42,28 @@ class DataNode:
 # InternalNode
 # -----------------------------
 class InternalNode:
-    def __init__(self, split_keys):
-        self.children = []
+    def __init__(self, split_keys, partitions=None):
         self.split_keys = split_keys
+        self.partitions = partitions  # 자식 노드 생성을 위한 partition 정보
+        self.children = []
         self.model = LinearModel()
 
-    def finalize_children(self, children):
-        self.children = children
+    def finalize_children(self):
+        if not self.children:
+            print("[ERROR] InternalNode finalize_children() called with no children.")
+            return
         positions = list(range(len(self.children)))
-        if len(self.split_keys) != len(positions):
-            print(f"[WARNING] split_keys({len(self.split_keys)}) and positions({len(positions)}) mismatch.")
         self.model.train(self.split_keys, positions)
-
-    def route(self, key):
-        child_idx = self.model.predict(key)
-        child_idx = max(0, min(child_idx, len(self.children) - 1))
-        return self.children[child_idx]
 
     @property
     def keys_list(self):
         all_keys = []
-        for child in self.children:
-            all_keys.extend(child.keys_list)
+        for part in self.partitions:
+            all_keys.extend(part)
         return sorted(all_keys)
 
 # -----------------------------
-# FLEX RMI (BFS Implementation)
+# FLEX RMI
 # -----------------------------
 class FLEX_RMI:
     def __init__(self):
@@ -81,130 +75,83 @@ class FLEX_RMI:
         sorted_data = sorted(data)
 
         # ---------------------------
-        # 1. 루트 노드 생성
+        # 1. 루트 노드 생성 및 자식 노드 초기화
         # ---------------------------
-        print(f"\n[ROOT] Creating Root Node...")
         if len(sorted_data) <= min_partition_size:
             self.root = DataNode(sorted_data)
             self.data_nodes.append(self.root)
-            print(f"[INFO] Root is a single DataNode.")
+            print(f"[INFO] Root is a DataNode")
             return
 
-        elif len(sorted_data) > max_data_node_size or not self.is_linear(sorted_data):
-            split_points = self.find_split_points(sorted_data, num_splits=4)
-            partitions = self.partition_data(sorted_data, split_points)
+        split_points = self.find_split_points(sorted_data)
+        partitions = self.partition_data(sorted_data, split_points)
 
-            if not partitions or any(len(p) == 0 for p in partitions):
-                self.root = DataNode(sorted_data)
-                self.data_nodes.append(self.root)
-                print(f"[INFO] Root fallback to DataNode due to split failure.")
-                return
-
-            split_keys = [part[0] for part in partitions]
-            self.root = InternalNode(split_keys)
-            print(f"[INFO] Root InternalNode created with split_keys {split_keys}")
-
-            current_level = []
-            for part in partitions:
-                current_level.append((part, self.root))
-
-        else:
+        if len(partitions) <= 1:
             self.root = DataNode(sorted_data)
             self.data_nodes.append(self.root)
-            print(f"[INFO] Root is a linear DataNode.")
+            print(f"[INFO] Root fallback to DataNode")
             return
 
+        split_keys = [part[0] for part in partitions]
+        self.root = InternalNode(split_keys, partitions)
+        print(f"[INFO] Root InternalNode created with split_keys {split_keys}")
+
         # ---------------------------
-        # 2. BFS 순회 시작
+        # 2. BFS 순회
         # ---------------------------
-        level = 1
+        current_level = [self.root]
+        level = 0
+
         while current_level:
             print(f"\n[LEVEL {level}] Processing...")
+
             next_level = []
-            parent_to_children = {}
+            prev_node = None
 
-            for partition, parent in current_level:
-                # 노드 생성
-                if len(partition) <= min_partition_size:
-                    node = DataNode(partition)
-                    self.data_nodes.append(node)
+            for node in current_level:
+                if isinstance(node, DataNode):
+                    continue  # 리프 노드일 경우 패스
 
-                elif len(partition) > max_data_node_size or not self.is_linear(partition):
-                    split_points = self.find_split_points(partition, num_splits=4)
-                    partitions = self.partition_data(partition, split_points)
-
-                    if not partitions or any(len(p) == 0 for p in partitions):
-                        node = DataNode(partition)
-                        self.data_nodes.append(node)
-                        continue
-
-                    split_keys = [part[0] for part in partitions]
-                    node = InternalNode(split_keys)
-                    for part in partitions:
-                        next_level.append((part, node))
-
-                else:
-                    node = DataNode(partition)
-                    self.data_nodes.append(node)
-
-                # 부모 노드에 자식 등록
-                if parent:
-                    if parent not in parent_to_children:
-                        parent_to_children[parent] = []
-                    parent_to_children[parent].append(node)
-
-            # 부모 노드 finalize_children 호출
-            for parent, children in parent_to_children.items():
-                parent.finalize_children(children)
-                print(f"[DEBUG] Parent {parent} assigned {len(children)} children")
-
-            # 인접 부모 병합
-            parent_list = list(parent_to_children.keys())
-            for i in range(1, len(parent_list)):
-                prev_parent = parent_list[i - 1]
-                curr_parent = parent_list[i]
-
-                if not prev_parent.children or not curr_parent.children:
-                    print(f"[WARNING] Parent {i - 1} or {i} has no children")
-                    continue
-
-                prev_last_child = prev_parent.children[-1]
-                curr_first_child = curr_parent.children[0]
-
-                print(f"[DEBUG] Merge check between {prev_last_child} and {curr_first_child}")
-
-                if self.is_cdf_similar(prev_last_child, curr_first_child):
-                    shared_node = self.create_shared_node(prev_last_child, curr_first_child)
-                    prev_parent.children[-1] = shared_node
-                    curr_parent.children[0] = shared_node
-
-                    prev_parent.finalize_children(prev_parent.children)
-                    curr_parent.finalize_children(curr_parent.children)
-
-                    print(f"[DEBUG] SharedNode created and parents updated at Level {level}")
-
-                    # 병합 후 기존 두 노드 제거
-                    new_next_level = []
-                    insert_index = None
-
-                    for idx, (partition, parent) in enumerate(next_level):
-                        if parent == prev_parent and partition and partition[0] == prev_last_child.keys_list[0]:
-                            insert_index = len(new_next_level)  # 삽입 위치 저장
-                            continue
-                        elif parent == curr_parent and partition and partition[0] == curr_first_child.keys_list[0]:
-                            continue
-                        else:
-                            new_next_level.append((partition, parent))
-
-                    # 병합된 shared_node를 prev_last_child가 있던 자리에 삽입
-                    merged_partition = prev_last_child.keys_list + curr_first_child.keys_list
-                    if insert_index is not None:
-                        new_next_level.insert(insert_index, (merged_partition, prev_parent))  # ✅ 정확한 위치에 삽입
+                # 자식 노드 생성
+                children = []
+                for partition in node.partitions:
+                    if len(partition) <= min_partition_size:
+                        child_node = DataNode(partition)
+                        self.data_nodes.append(child_node)
                     else:
-                        print("[WARNING] SharedNode 삽입 위치를 찾지 못했습니다. 맨 뒤에 추가합니다.")
-                        new_next_level.append((merged_partition, prev_parent))
+                        sub_split_points = self.find_split_points(partition)
+                        sub_partitions = self.partition_data(partition, sub_split_points)
 
-                    next_level = new_next_level
+                        if len(sub_partitions) <= 1:
+                            child_node = DataNode(partition)
+                            self.data_nodes.append(child_node)
+                        else:
+                            sub_split_keys = [p[0] for p in sub_partitions]
+                            child_node = InternalNode(sub_split_keys, sub_partitions)
+                    children.append(child_node)
+
+                node.children = children
+                node.finalize_children()
+
+                next_level.extend(children)
+
+                # 병합 판단
+                if prev_node and isinstance(prev_node, InternalNode) and isinstance(node, InternalNode):
+                    prev_last_child = prev_node.children[-1]
+                    curr_first_child = node.children[0]
+
+                    print(f"[DEBUG] Merge check between {prev_last_child} and {curr_first_child}")
+
+                    if self.is_cdf_similar(prev_last_child, curr_first_child):
+                        shared_node = self.create_shared_node(prev_last_child, curr_first_child)
+                        prev_node.children[-1] = shared_node
+                        node.children[0] = shared_node
+                        prev_node.finalize_children()
+                        node.finalize_children()
+
+                        print(f"[DEBUG] SharedNode created at Level {level}")
+
+                prev_node = node  # 이전 노드 갱신
 
             current_level = next_level
             level += 1
@@ -213,23 +160,26 @@ class FLEX_RMI:
         merged_keys = sorted(left_node.keys_list + right_node.keys_list)
 
         if len(merged_keys) <= 1024 or self.is_linear(merged_keys):
-            shared_node = DataNode(merged_keys, density=0.6)
+            shared_node = DataNode(merged_keys)
+            self.data_nodes.append(shared_node)
         else:
-            split_points = self.find_split_points(merged_keys, num_splits=4)
+            split_points = self.find_split_points(merged_keys)
             partitions = self.partition_data(merged_keys, split_points)
-            if len(partitions) <= 1 or any(len(p) == 0 for p in partitions):
-                shared_node = DataNode(merged_keys, density=0.6)
+
+            if len(partitions) <= 1:
+                shared_node = DataNode(merged_keys)
+                self.data_nodes.append(shared_node)
             else:
                 split_keys = [p[0] for p in partitions]
-                shared_node = InternalNode(split_keys)
-                shared_node.finalize_children([DataNode(p) for p in partitions])
+                shared_node = InternalNode(split_keys, partitions)
 
         shared_node.shared = True
         self.shared_nodes.append(shared_node)
-
-        print(f"[DEBUG] SharedNode created with {len(merged_keys)} keys")
         return shared_node
 
+    # -----------------------------
+    # 헬퍼 메소드들
+    # -----------------------------
     def is_linear(self, keys):
         if len(keys) < 2:
             return True
@@ -246,26 +196,21 @@ class FLEX_RMI:
         keys_b = node_b.keys_list
 
         if not keys_a or not keys_b:
-            print("[WARNING] One or both nodes have no keys during CDF similarity check")
+            print("[WARNING] One or both nodes have no keys during similarity check")
             return False
 
-        def normalize_keys(keys):
-            min_val = keys[0]
-            max_val = keys[-1]
-            if min_val == max_val:
+        def normalize(keys):
+            min_v, max_v = keys[0], keys[-1]
+            if min_v == max_v:
                 return [0.5] * len(keys)
-            return [(k - min_val) / (max_val - min_val) for k in keys]
+            return [(k - min_v) / (max_v - min_v) for k in keys]
 
-        norm_keys_a = normalize_keys(keys_a)
-        norm_keys_b = normalize_keys(keys_b)
+        norm_a = normalize(keys_a)
+        norm_b = normalize(keys_b)
 
-        len_sample = min(len(norm_keys_a), len(norm_keys_b), 100)
-
-        sample_indices_a = np.linspace(0, len(norm_keys_a) - 1, len_sample, dtype=int)
-        sample_indices_b = np.linspace(0, len(norm_keys_b) - 1, len_sample, dtype=int)
-
-        sample_a = np.array(norm_keys_a)[sample_indices_a]
-        sample_b = np.array(norm_keys_b)[sample_indices_b]
+        len_sample = min(len(norm_a), len(norm_b), 100)
+        sample_a = np.array(norm_a)[np.linspace(0, len(norm_a)-1, len_sample, dtype=int)]
+        sample_b = np.array(norm_b)[np.linspace(0, len(norm_b)-1, len_sample, dtype=int)]
 
         mae = np.mean(np.abs(sample_a - sample_b))
         print(f"[MERGE TEST] Normalized MAE: {mae}, Threshold: {threshold}")
@@ -279,28 +224,23 @@ class FLEX_RMI:
 
         x = np.array(keys)
         unique_x, _ = np.unique(x, return_index=True)
-
         if len(unique_x) < 2:
             return []
 
         cdf = np.arange(len(unique_x)) / len(unique_x)
-
         try:
             gradients = np.gradient(cdf, unique_x)
         except Exception:
             return []
 
         gradients = np.nan_to_num(gradients, nan=0.0, posinf=0.0, neginf=0.0)
-
         top_k = min(num_splits - 1, len(gradients) - 1)
         if top_k <= 0:
             return []
 
         split_indices = np.argsort(-gradients)[:top_k]
         split_indices.sort()
-        split_points = [unique_x[idx] for idx in split_indices]
-
-        return split_points
+        return [unique_x[idx] for idx in split_indices]
 
     def partition_data(self, keys, split_points):
         partitions = []
@@ -319,27 +259,4 @@ class FLEX_RMI:
         if remaining:
             partitions.append(remaining)
 
-        partitions = [p for p in partitions if p]
-
-        if len(partitions) <= 1:
-            return [keys]
-
-        return partitions
-
-# -----------------------------
-# Visualization (Optional for debugging)
-# -----------------------------
-def visualize_tree_structure(level_counts):
-    levels = list(level_counts.keys())
-    internal_nodes = [counts['internal'] for counts in level_counts.values()]
-    data_nodes = [counts['data'] for counts in level_counts.values()]
-
-    fig, ax = plt.subplots()
-    ax.bar(levels, internal_nodes, label='Internal Nodes')
-    ax.bar(levels, data_nodes, bottom=internal_nodes, label='Data Nodes')
-
-    ax.set_xlabel("Tree Levels")
-    ax.set_ylabel("Number of Nodes")
-    ax.set_title("FLEX RMI Tree Structure by Level")
-    ax.legend()
-    plt.show()
+        return partitions if len(partitions) > 1 else [keys]
