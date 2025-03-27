@@ -143,7 +143,12 @@ class FLEX_RMI:
                     print(f"[DEBUG] Merge check between {prev_last_child} and {curr_first_child}")
 
                     if self.is_cdf_similar(prev_last_child, curr_first_child):
-                        shared_node = self.create_shared_node(prev_last_child, curr_first_child)
+                        # InternalNode끼리 병합일 경우만 InternalNode 생성
+                        if isinstance(prev_last_child, InternalNode) and isinstance(curr_first_child, InternalNode):
+                            shared_node = self.create_shared_node(prev_last_child, curr_first_child, force_internal=True)
+                        else:
+                            shared_node = self.create_shared_node(prev_last_child, curr_first_child, force_internal=False)
+
                         prev_node.children[-1] = shared_node
                         node.children[0] = shared_node
                         prev_node.finalize_children()
@@ -156,13 +161,11 @@ class FLEX_RMI:
             current_level = next_level
             level += 1
 
-    def create_shared_node(self, left_node, right_node):
+    def create_shared_node(self, left_node, right_node, force_internal=False):
         merged_keys = sorted(left_node.keys_list + right_node.keys_list)
 
-        if len(merged_keys) <= 1024 or self.is_linear(merged_keys):
-            shared_node = DataNode(merged_keys)
-            self.data_nodes.append(shared_node)
-        else:
+        # --- ✅ InternalNode 병합만 InternalNode로 유지 ---
+        if force_internal:
             split_points = self.find_split_points(merged_keys)
             partitions = self.partition_data(merged_keys, split_points)
 
@@ -172,6 +175,10 @@ class FLEX_RMI:
             else:
                 split_keys = [p[0] for p in partitions]
                 shared_node = InternalNode(split_keys, partitions)
+        else:
+            # 무조건 DataNode로 처리
+            shared_node = DataNode(merged_keys)
+            self.data_nodes.append(shared_node)
 
         shared_node.shared = True
         self.shared_nodes.append(shared_node)
