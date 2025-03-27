@@ -38,6 +38,61 @@ class DataNode:
     def keys_list(self):
         return self.keys
 
+    def search_with_cost(self, key):
+        pred_pos = self.model.predict(key)
+        intra_node_cost = 1
+
+        if pred_pos < 0:
+            pred_pos = 0
+        elif pred_pos >= self.num_keys:
+            pred_pos = self.num_keys - 1
+
+        if self.keys[pred_pos] == key:
+            return self.keys[pred_pos], intra_node_cost
+
+        found_idx, exp_search_cost = self._exponential_search_with_cost(key, pred_pos)
+        intra_node_cost += exp_search_cost
+        if found_idx is not None:
+            return self.keys[found_idx], intra_node_cost
+        return None, intra_node_cost
+
+    def _exponential_search_with_cost(self, key, pred_pos):
+        search_cost = 0
+        bound = 1
+        while pred_pos + bound < self.num_keys and self.keys[pred_pos + bound] < key:
+            bound *= 2
+            search_cost += 1
+        left = pred_pos + bound // 2
+        right = min(pred_pos + bound, self.num_keys - 1)
+
+        l_bound = 1
+        while pred_pos - l_bound >= 0 and self.keys[pred_pos - l_bound] > key:
+            l_bound *= 2
+            search_cost += 1
+        l_left = max(pred_pos - l_bound, 0)
+        l_right = pred_pos - l_bound // 2
+
+        result, binary_search_cost = self._binary_search_range_with_cost(left, right, key)
+        search_cost += binary_search_cost
+        if result is not None:
+            return result, search_cost
+        result, binary_search_cost = self._binary_search_range_with_cost(l_left, l_right, key)
+        search_cost += binary_search_cost
+        return result, search_cost
+
+    def _binary_search_range_with_cost(self, left, right, key):
+        cost = 0
+        while left <= right:
+            mid = (left + right) // 2
+            cost += 1
+            if self.keys[mid] == key:
+                return mid, cost
+            elif self.keys[mid] < key:
+                left = mid + 1
+            else:
+                right = mid - 1
+        return None, cost
+
 # -----------------------------
 # InternalNode
 # -----------------------------
@@ -62,6 +117,11 @@ class InternalNode:
             all_keys.extend(part)
         return sorted(all_keys)
 
+    def route(self, key):
+        child_idx = self.model.predict(key)
+        child_idx = max(0, min(child_idx, len(self.children) - 1))
+        return self.children[child_idx]
+
 # -----------------------------
 # FLEX RMI
 # -----------------------------
@@ -74,12 +134,9 @@ class FLEX_RMI:
     def build(self, data, min_partition_size=1024, max_data_node_size=4096):
         sorted_data = sorted(data)
 
-        # ---------------------------
-        # 1. 루트 노드 생성 및 자식 노드 초기화
-        # ---------------------------
         if len(sorted_data) <= min_partition_size:
-            self.root = DataNode(sorted_data)
-            self.data_nodes.append(self.root)
+            self.insert_sorted(DataNode(sorted_data))
+            self.root = self.data_nodes[-1]
             print(f"[INFO] Root is a DataNode")
             return
 
@@ -87,8 +144,8 @@ class FLEX_RMI:
         partitions = self.partition_data(sorted_data, split_points)
 
         if len(partitions) <= 1:
-            self.root = DataNode(sorted_data)
-            self.data_nodes.append(self.root)
+            self.insert_sorted(DataNode(sorted_data))
+            self.root = self.data_nodes[-1]
             print(f"[INFO] Root fallback to DataNode")
             return
 
@@ -96,35 +153,30 @@ class FLEX_RMI:
         self.root = InternalNode(split_keys, partitions)
         print(f"[INFO] Root InternalNode created with split_keys {split_keys}")
 
-        # ---------------------------
-        # 2. BFS 순회
-        # ---------------------------
         current_level = [self.root]
         level = 0
 
         while current_level:
             print(f"\n[LEVEL {level}] Processing...")
-
             next_level = []
             prev_node = None
 
             for node in current_level:
                 if isinstance(node, DataNode):
-                    continue  # 리프 노드일 경우 패스
+                    continue
 
-                # 자식 노드 생성
                 children = []
                 for partition in node.partitions:
-                    if len(partition) <= min_partition_size:
+                    if len(partition) <= min_partition_size or (len(partition) <= max_data_node_size and self.is_linear(partition)):
                         child_node = DataNode(partition)
-                        self.data_nodes.append(child_node)
+                        self.insert_sorted(child_node)
                     else:
                         sub_split_points = self.find_split_points(partition)
                         sub_partitions = self.partition_data(partition, sub_split_points)
 
                         if len(sub_partitions) <= 1:
                             child_node = DataNode(partition)
-                            self.data_nodes.append(child_node)
+                            self.insert_sorted(child_node)
                         else:
                             sub_split_keys = [p[0] for p in sub_partitions]
                             child_node = InternalNode(sub_split_keys, sub_partitions)
@@ -132,18 +184,19 @@ class FLEX_RMI:
 
                 node.children = children
                 node.finalize_children()
-
                 next_level.extend(children)
 
-                # 병합 판단
-                if prev_node and isinstance(prev_node, InternalNode) and isinstance(node, InternalNode):
+                # Merge 판단
+                if (
+                    prev_node and isinstance(prev_node, InternalNode)
+                    and isinstance(node, InternalNode)
+                ):
                     prev_last_child = prev_node.children[-1]
                     curr_first_child = node.children[0]
 
                     print(f"[DEBUG] Merge check between {prev_last_child} and {curr_first_child}")
 
                     if self.is_cdf_similar(prev_last_child, curr_first_child):
-                        # InternalNode끼리 병합일 경우만 InternalNode 생성
                         if isinstance(prev_last_child, InternalNode) and isinstance(curr_first_child, InternalNode):
                             shared_node = self.create_shared_node(prev_last_child, curr_first_child, force_internal=True)
                         else:
@@ -156,37 +209,44 @@ class FLEX_RMI:
 
                         print(f"[DEBUG] SharedNode created at Level {level}")
 
-                prev_node = node  # 이전 노드 갱신
+                prev_node = node
 
             current_level = next_level
             level += 1
 
+    def insert_sorted(self, node):
+        import bisect
+        key = node.keys_list[0]
+        keys = [n.keys_list[0] for n in self.data_nodes]
+        index = bisect.bisect_left(keys, key)
+        self.data_nodes.insert(index, node)
+
     def create_shared_node(self, left_node, right_node, force_internal=False):
         merged_keys = sorted(left_node.keys_list + right_node.keys_list)
 
-        # --- ✅ InternalNode 병합만 InternalNode로 유지 ---
+        if isinstance(left_node, DataNode):
+            self.data_nodes.remove(left_node)
+        if isinstance(right_node, DataNode):
+            self.data_nodes.remove(right_node)
+
         if force_internal:
             split_points = self.find_split_points(merged_keys)
             partitions = self.partition_data(merged_keys, split_points)
 
             if len(partitions) <= 1:
                 shared_node = DataNode(merged_keys)
-                self.data_nodes.append(shared_node)
+                self.insert_sorted(shared_node)
             else:
                 split_keys = [p[0] for p in partitions]
                 shared_node = InternalNode(split_keys, partitions)
         else:
-            # 무조건 DataNode로 처리
             shared_node = DataNode(merged_keys)
-            self.data_nodes.append(shared_node)
+            self.insert_sorted(shared_node)
 
         shared_node.shared = True
         self.shared_nodes.append(shared_node)
         return shared_node
 
-    # -----------------------------
-    # 헬퍼 메소드들
-    # -----------------------------
     def is_linear(self, keys):
         if len(keys) < 2:
             return True
@@ -267,3 +327,22 @@ class FLEX_RMI:
             partitions.append(remaining)
 
         return partitions if len(partitions) > 1 else [keys]
+
+    def search_with_cost(self, key):
+        node = self.root
+        traverse_cost = 0
+
+        while isinstance(node, InternalNode):
+            traverse_cost += 1
+            node = node.route(key)
+
+        found, intra_node_cost = node.search_with_cost(key)
+        total_cost = traverse_cost + intra_node_cost
+
+        return {
+            "found": found is not None,
+            "TraverseToLeafCost": traverse_cost,
+            "IntraNodeCost": intra_node_cost,
+            "TotalCost": total_cost
+        }
+
