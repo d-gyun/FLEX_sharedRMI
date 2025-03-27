@@ -204,6 +204,13 @@ class FLEX_RMI:
 
                         prev_node.children[-1] = shared_node
                         node.children[0] = shared_node
+
+                        idx = next_level.index(prev_last_child)
+                        # prev_last_child와 curr_first_child를 모두 제거
+                        next_level.pop(idx)  # prev_last_child
+                        next_level.pop(idx)  # curr_first_child (앞에서 pop 했기 때문에 같은 위치)
+                        next_level.insert(idx, shared_node)
+
                         prev_node.finalize_children()
                         node.finalize_children()
 
