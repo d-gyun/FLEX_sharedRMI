@@ -98,8 +98,8 @@ def benchmark_search_cost_cdf(index_name, rmi, search_keys):
     plt.grid(True)
     plt.show()
 
-    print(f"[{index_name}] 평균 TraverseToLeafCost : {np.mean(total_costs):.4f}, 최대 TraverseToLeafCost : {np.max(total_costs)}")
-    print(f"[RESULT] Missed Keys: {len(missed_keys)} / {len(search_keys)} ({len(missed_keys) / len(search_keys) * 100:.2f}%)")
+    # print(f"[{index_name}] 평균 TotalCost : {np.mean(total_costs):.4f}, 최대 TotalCost : {np.max(total_costs)}")
+    print(f"[RESULT]{index_name} Missed Keys: {len(missed_keys)} / {len(search_keys)} ({len(missed_keys) / len(search_keys) * 100:.2f}%)")
 
     return total_costs, cdf
 

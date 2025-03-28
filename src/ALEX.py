@@ -121,11 +121,11 @@ class InternalNode:
         self.children = children if children else []
         self.model.train(keys_for_training, labels)
 
-        print("\n[DEBUG] InternalNode 예측 정확도 검사")
-        for k, label in zip(keys_for_training, labels):
-            pred = self.model.predict(k)
-            pred_idx = round(pred)
-            print(f"Key: {k}, Label: {label}, Pred: {pred:.3f}, Pred_idx: {pred_idx}")
+        # print("\n[DEBUG] InternalNode 예측 정확도 검사")
+        # for k, label in zip(keys_for_training, labels):
+        #     pred = self.model.predict(k)
+        #     pred_idx = round(pred)
+        #     print(f"Key: {k}, Label: {label}, Pred: {pred:.3f}, Pred_idx: {pred_idx}")
 
     def route(self, key):
         child_idx = round(self.model.predict(key))
@@ -197,14 +197,13 @@ class ALEX_RMI:
         error = np.abs(predicted - y)
         return np.max(error) < len(keys) * 0.2
 
-    def find_split_points(self, keys, num_splits):
+    def find_split_points(self, keys, num_splits=4, gradient_threshold=0.01):
         n = len(keys)
         if n < 2:
             return []
 
         x = np.array(keys)
         unique_x, _ = np.unique(x, return_index=True)
-
         if len(unique_x) < 2:
             return []
 
@@ -213,19 +212,25 @@ class ALEX_RMI:
         try:
             gradients = np.gradient(cdf, unique_x)
         except Exception:
-            return []
+            gradients = np.zeros_like(unique_x)
 
         gradients = np.nan_to_num(gradients, nan=0.0, posinf=0.0, neginf=0.0)
+        max_grad = np.max(gradients)
 
-        top_k = min(num_splits - 1, len(gradients) - 1)
-        if top_k <= 0:
-            return []
-
-        split_indices = np.argsort(-gradients)[:top_k]
-        split_indices.sort()
-        split_points = [unique_x[idx] for idx in split_indices]
-
-        return split_points
+        if max_grad >= gradient_threshold:
+            # CDF 기반 분할
+            top_k = min(num_splits - 1, len(gradients) - 1)
+            if top_k <= 0:
+                return []
+            split_indices = np.argsort(-gradients)[:top_k]
+            split_indices.sort()
+            split_points = [unique_x[idx] for idx in split_indices]
+            return split_points
+        else:
+            # 균등 분할 fallback
+            interval = len(keys) // num_splits
+            split_points = [keys[i * interval] for i in range(1, num_splits)]
+            return split_points
 
     def partition_data(self, keys, split_points):
         partitions = []

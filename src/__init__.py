@@ -8,7 +8,7 @@ def load_dataset(file_path):
 
 def main():
     # 데이터 로드
-    data_file = "../datasets/dataset_LOGNORMAL_10000.csv"
+    data_file = "../datasets/dataset_LOGNORMAL_1000000.csv"
     insert_file = "../datasets/dataset_LOGNORMAL_10000.csv"
 
     initial_data = load_dataset(data_file)
@@ -22,18 +22,18 @@ def main():
     alex.build(initial_data.tolist())
 
     # FLEX 인덱스 빌드 및 분석
-    # flex = FLEX_RMI()
-    # flex.build(initial_data.tolist())
+    flex = FLEX_RMI()
+    flex.build(initial_data.tolist())
 
     # 실험 1 - 트리 구조 분석 (DataNode 클래스를 넘김)
     report_tree_structure("ALEX", alex, ALEX_DataNode)
-    # report_tree_structure("FLEX", flex, FLEX_DataNode)
+    report_tree_structure("FLEX", flex, FLEX_DataNode)
 
 
     # 실험 2 - Search Cost CDF (전체 데이터 1/10 샘플)
     search_keys = initial_data[np.random.choice(len(initial_data), len(initial_data)//10, replace=False)]
     benchmark_search_cost_cdf("ALEX", alex, search_keys)
-    # benchmark_search_cost_cdf("FLEX", flex, search_keys)
+    benchmark_search_cost_cdf("FLEX", flex, search_keys)
 
     # 실험 3 - Insert + Split 추적
     # benchmark_insert_with_split_tracking("ALEX", alex, insert_data)

@@ -19,7 +19,7 @@ class LinearModel:
     def predict(self, key):
         X = np.array([[key]])
         pred = self.model.predict(X)[0]
-        return int(pred)
+        return pred
 
 # -----------------------------
 # DataNode
@@ -39,7 +39,7 @@ class DataNode:
         return self.keys
 
     def search_with_cost(self, key):
-        pred_pos = self.model.predict(key)
+        pred_pos = round(self.model.predict(key))
         intra_node_cost = 1
 
         if pred_pos < 0:
@@ -54,7 +54,7 @@ class DataNode:
         intra_node_cost += exp_search_cost
         if found_idx is not None:
             return self.keys[found_idx], intra_node_cost
-        print(f"{key}key is not exist")
+        # print(f"{key}key is not exist")
         return None, intra_node_cost
 
     def _exponential_search_with_cost(self, key, pred_pos):
@@ -105,11 +105,18 @@ class InternalNode:
         self.model = LinearModel()
 
     def finalize_children(self):
-        if not self.children:
-            print("[ERROR] InternalNode finalize_children() called with no children.")
+        if not self.children or not self.partitions:
+            print("[ERROR] finalize_children: Missing children or partitions")
             return
-        positions = list(range(len(self.children)))
-        self.model.train(self.split_keys, positions)
+
+        keys_for_training = []
+        positions = []
+
+        for i, part in enumerate(self.partitions):
+            keys_for_training.extend(part)
+            positions.extend([i] * len(part))
+
+        self.model.train(keys_for_training, positions)
 
     @property
     def keys_list(self):
@@ -119,7 +126,7 @@ class InternalNode:
         return sorted(all_keys)
 
     def route(self, key):
-        child_idx = self.model.predict(key)
+        child_idx = round(self.model.predict(key))
         child_idx = max(0, min(child_idx, len(self.children) - 1))
         return self.children[child_idx]
 
@@ -215,7 +222,7 @@ class FLEX_RMI:
                         prev_node.finalize_children()
                         node.finalize_children()
 
-                        print(f"[DEBUG] SharedNode created at Level {level}")
+                        print(f"[DEBUG] SharedNode created at Level {level+1}")
 
                 prev_node = node
 
@@ -308,11 +315,11 @@ class FLEX_RMI:
         sample_b = np.array(norm_b)[np.linspace(0, len(norm_b)-1, len_sample, dtype=int)]
 
         mae = np.mean(np.abs(sample_a - sample_b))
-        # print(f"[MERGE TEST] Normalized MAE: {mae}, Threshold: {threshold}")
+        print(f"[MERGE TEST] Normalized MAE: {mae}, Threshold: {threshold}")
 
         return mae < threshold
 
-    def find_split_points(self, keys, num_splits=4):
+    def find_split_points(self, keys, num_splits=4, gradient_threshold=0.01):
         n = len(keys)
         if n < 2:
             return []
@@ -323,19 +330,29 @@ class FLEX_RMI:
             return []
 
         cdf = np.arange(len(unique_x)) / len(unique_x)
+
         try:
             gradients = np.gradient(cdf, unique_x)
         except Exception:
-            return []
+            gradients = np.zeros_like(unique_x)
 
         gradients = np.nan_to_num(gradients, nan=0.0, posinf=0.0, neginf=0.0)
-        top_k = min(num_splits - 1, len(gradients) - 1)
-        if top_k <= 0:
-            return []
+        max_grad = np.max(gradients)
 
-        split_indices = np.argsort(-gradients)[:top_k]
-        split_indices.sort()
-        return [unique_x[idx] for idx in split_indices]
+        if max_grad >= gradient_threshold:
+            # CDF 기반 분할
+            top_k = min(num_splits - 1, len(gradients) - 1)
+            if top_k <= 0:
+                return []
+            split_indices = np.argsort(-gradients)[:top_k]
+            split_indices.sort()
+            split_points = [unique_x[idx] for idx in split_indices]
+            return split_points
+        else:
+            # 균등 분할 fallback
+            interval = len(keys) // num_splits
+            split_points = [keys[i * interval] for i in range(1, num_splits)]
+            return split_points
 
     def partition_data(self, keys, split_points):
         partitions = []
@@ -364,10 +381,13 @@ class FLEX_RMI:
             traverse_cost += 1
             node = node.route(key)
 
+        miss = key not in node.keys
+
         found, intra_node_cost = node.search_with_cost(key)
         total_cost = traverse_cost + intra_node_cost
 
         return {
+            "miss": miss,
             "found": found is not None,
             "TraverseToLeafCost": traverse_cost,
             "IntraNodeCost": intra_node_cost,
