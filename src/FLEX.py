@@ -54,6 +54,7 @@ class DataNode:
         intra_node_cost += exp_search_cost
         if found_idx is not None:
             return self.keys[found_idx], intra_node_cost
+        print(f"{key}key is not exist")
         return None, intra_node_cost
 
     def _exponential_search_with_cost(self, key, pred_pos):
@@ -194,7 +195,7 @@ class FLEX_RMI:
                     prev_last_child = prev_node.children[-1]
                     curr_first_child = node.children[0]
 
-                    print(f"[DEBUG] Merge check between {prev_last_child} and {curr_first_child}")
+                    # print(f"[DEBUG] Merge check between {prev_last_child} and {curr_first_child}")
 
                     if self.is_cdf_similar(prev_last_child, curr_first_child):
                         if isinstance(prev_last_child, InternalNode) and isinstance(curr_first_child, InternalNode):
@@ -231,23 +232,43 @@ class FLEX_RMI:
     def create_shared_node(self, left_node, right_node, force_internal=False):
         merged_keys = sorted(left_node.keys_list + right_node.keys_list)
 
+        # 병합된 노드가 DataNode인 경우 data_nodes 리스트에서 제거
         if isinstance(left_node, DataNode):
             self.data_nodes.remove(left_node)
         if isinstance(right_node, DataNode):
             self.data_nodes.remove(right_node)
 
+        # Internal + Internal → 무조건 InternalNode
         if force_internal:
             split_points = self.find_split_points(merged_keys)
             partitions = self.partition_data(merged_keys, split_points)
 
             if len(partitions) <= 1:
-                shared_node = DataNode(merged_keys)
+                shared_node = DataNode(merged_keys, density=0.6)
                 self.insert_sorted(shared_node)
             else:
                 split_keys = [p[0] for p in partitions]
                 shared_node = InternalNode(split_keys, partitions)
+
+        # Internal + Data or Data + Internal → is_linear 판단
+        elif isinstance(left_node, InternalNode) or isinstance(right_node, InternalNode):
+            if self.is_linear(merged_keys):
+                shared_node = DataNode(merged_keys, density=0.6)
+                self.insert_sorted(shared_node)
+            else:
+                split_points = self.find_split_points(merged_keys)
+                partitions = self.partition_data(merged_keys, split_points)
+
+                if len(partitions) <= 1:
+                    shared_node = DataNode(merged_keys, density=0.6)
+                    self.insert_sorted(shared_node)
+                else:
+                    split_keys = [p[0] for p in partitions]
+                    shared_node = InternalNode(split_keys, partitions)
+
+        # Data + Data → 무조건 DataNode
         else:
-            shared_node = DataNode(merged_keys)
+            shared_node = DataNode(merged_keys, density=0.6)
             self.insert_sorted(shared_node)
 
         shared_node.shared = True
@@ -287,7 +308,7 @@ class FLEX_RMI:
         sample_b = np.array(norm_b)[np.linspace(0, len(norm_b)-1, len_sample, dtype=int)]
 
         mae = np.mean(np.abs(sample_a - sample_b))
-        print(f"[MERGE TEST] Normalized MAE: {mae}, Threshold: {threshold}")
+        # print(f"[MERGE TEST] Normalized MAE: {mae}, Threshold: {threshold}")
 
         return mae < threshold
 

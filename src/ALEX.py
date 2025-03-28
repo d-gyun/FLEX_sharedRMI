@@ -20,7 +20,7 @@ class LinearModel:
     def predict(self, key):
         X = np.array([[key]])
         pred = self.model.predict(X)[0]
-        return int(pred)
+        return pred
 
 # -----------------------------
 # DataNode (Leaf)
@@ -41,7 +41,7 @@ class DataNode:
         return self.num_keys / self.capacity >= self.max_density
 
     def search_with_cost(self, key):
-        pred_pos = self.model.predict(key)
+        pred_pos = round(self.model.predict(key))
         intra_node_cost = 1
         if pred_pos < 0:
             pred_pos = 0
@@ -116,15 +116,19 @@ class DataNode:
 # InternalNode (RMI 트리 노드)
 # -----------------------------
 class InternalNode:
-    def __init__(self, split_keys, children=None):
+    def __init__(self, keys_for_training, labels, children=None):
         self.model = LinearModel()
         self.children = children if children else []
-        self.split_keys = split_keys
-        positions = list(range(len(self.children)))
-        self.model.train(self.split_keys, positions)
+        self.model.train(keys_for_training, labels)
+
+        print("\n[DEBUG] InternalNode 예측 정확도 검사")
+        for k, label in zip(keys_for_training, labels):
+            pred = self.model.predict(k)
+            pred_idx = round(pred)
+            print(f"Key: {k}, Label: {label}, Pred: {pred:.3f}, Pred_idx: {pred_idx}")
 
     def route(self, key):
-        child_idx = self.model.predict(key)
+        child_idx = round(self.model.predict(key))
         child_idx = max(0, min(child_idx, len(self.children) - 1))
         return self.children[child_idx]
 
@@ -170,13 +174,17 @@ class ALEX_RMI:
             return node
 
         children = []
-        split_keys = []
-        for part in partitions:
+        training_keys = []
+        training_labels = []
+
+        for i, part in enumerate(partitions):
             child = self._build_recursive(part, min_partition_size, max_data_node_size)
             children.append(child)
-            split_keys.append(part[0])
 
-        return InternalNode(split_keys, children)
+            training_keys.extend(part)  # 전체 key를 학습에 사용
+            training_labels.extend([i] * len(part))  # 각 key의 라벨은 해당 자식 index
+
+        return InternalNode(training_keys, training_labels, children)
 
     def is_linear(self, keys):
         if len(keys) < 2:
@@ -189,7 +197,7 @@ class ALEX_RMI:
         error = np.abs(predicted - y)
         return np.max(error) < len(keys) * 0.2
 
-    def find_split_points(self, keys, num_splits=4):
+    def find_split_points(self, keys, num_splits):
         n = len(keys)
         if n < 2:
             return []
@@ -243,9 +251,13 @@ class ALEX_RMI:
         while isinstance(node, InternalNode):
             traverse_to_leaf_cost += 1
             node = node.route(key)
+
+        miss = key not in node.keys
+
         found, intra_node_cost = node.search_with_cost(key)
         total_cost = traverse_to_leaf_cost + intra_node_cost
         return {
+            "miss": miss,
             "found": found is not None,
             "TraverseToLeafCost": traverse_to_leaf_cost,
             "IntraNodeCost": intra_node_cost,
