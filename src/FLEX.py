@@ -247,7 +247,7 @@ class FLEX_RMI:
 
         # Internal + Internal → 무조건 InternalNode
         if force_internal:
-            split_points = self.find_split_points(merged_keys)
+            split_points = self.find_split_points(merged_keys, num_splits=8)
             partitions = self.partition_data(merged_keys, split_points)
 
             if len(partitions) <= 1:
@@ -263,7 +263,7 @@ class FLEX_RMI:
                 shared_node = DataNode(merged_keys, density=0.6)
                 self.insert_sorted(shared_node)
             else:
-                split_points = self.find_split_points(merged_keys)
+                split_points = self.find_split_points(merged_keys, num_splits=8)
                 partitions = self.partition_data(merged_keys, split_points)
 
                 if len(partitions) <= 1:
