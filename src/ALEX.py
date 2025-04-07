@@ -99,6 +99,15 @@ class DataNode:
         search_cost += binary_search_cost
         return result, search_cost
 
+    def search_by_exponential_without_model(self, key, start_direction="right"):
+        intra_node_cost = 1
+        pred_pos = 0 if start_direction == "left" else self.num_keys - 1
+        found_idx, exp_search_cost = self.exponential_search_with_cost(key, pred_pos)
+        intra_node_cost += exp_search_cost
+        if found_idx is not None:
+            return self.keys[found_idx], intra_node_cost
+        return None, intra_node_cost
+
     def _binary_search_range_with_cost(self, left, right, key):
         cost = 0
         while left <= right:
@@ -257,16 +266,53 @@ class ALEX_RMI:
             traverse_to_leaf_cost += 1
             node = node.route(key)
 
-        miss = key not in node.keys
-
         found, intra_node_cost = node.search_with_cost(key)
         total_cost = traverse_to_leaf_cost + intra_node_cost
+
+        if found is not None:
+            return {
+                "miss": False,
+                "found": found is not None,
+                "TraverseToLeafCost": traverse_to_leaf_cost,
+                "IntraNodeCost": intra_node_cost,
+                "TotalCost": total_cost
+            }
+
+        i = self.data_nodes.index(node)
+        fallback_cost = 0
+
+        if key > node.keys[-1]:
+            for j in range(i + 1, len(self.data_nodes)):
+                fallback_node = self.data_nodes[j]
+                found, cost = fallback_node.search_by_exponential_without_model(key, start_direction="right")
+                fallback_cost += cost
+                if found is not None:
+                    return {
+                        "miss": True,
+                        "found": True,
+                        "TraverseToLeafCost": traverse_to_leaf_cost,
+                        "IntraNodeCost": intra_node_cost + fallback_cost,
+                        "TotalCost": total_cost + fallback_cost
+                    }
+        elif key < node.keys[0]:
+            for j in range(i - 1, -1, -1):
+                fallback_node = self.data_nodes[j]
+                found, cost = fallback_node.search_by_exponential_without_model(key, start_direction="left")
+                fallback_cost += cost
+                if found is not None:
+                    return {
+                        "miss": True,
+                        "found": True,
+                        "TraverseToLeafCost": traverse_to_leaf_cost,
+                        "IntraNodeCost": intra_node_cost + fallback_cost,
+                        "TotalCost": total_cost + fallback_cost
+                    }
         return {
-            "miss": miss,
-            "found": found is not None,
+            "miss": True,
+            "found": False,
             "TraverseToLeafCost": traverse_to_leaf_cost,
-            "IntraNodeCost": intra_node_cost,
-            "TotalCost": total_cost
+            "IntraNodeCost": intra_node_cost + fallback_cost,
+            "TotalCost": total_cost + fallback_cost
         }
 
     def insert_with_split_logging(self, key):

@@ -79,27 +79,36 @@ def benchmark_search_cost_cdf(index_name, rmi, search_keys):
     total_costs = []
 
     missed_keys = []
+    # not_found_keys = []
     for key in search_keys:
         result = rmi.search_with_cost(key)
         total_costs.append(result["TotalCost"])
         if result["miss"]:
             missed_keys.append(key)
+        # if not result["found"]:
+        #     not_found_keys.append(key)
 
     total_costs = np.array(total_costs)
     total_costs.sort()
 
     cdf = np.arange(len(total_costs)) / len(total_costs)
 
+    # x축을 끝까지 그리기 위해 마지막 점 추가
+    total_costs = np.append(total_costs, 100)
+    cdf = np.append(cdf, 1.0)
+
     plt.figure(figsize=(10, 6))
-    plt.plot(total_costs, cdf, marker='o', linestyle='-')
+    plt.plot(total_costs, cdf, drawstyle='steps-post')
     plt.title(f"{index_name} Search TotalCost CDF")
     plt.xlabel("Total Search Cost")
     plt.ylabel("CDF")
+    plt.xlim(0, 100)
     plt.grid(True)
     plt.show()
 
-    # print(f"[{index_name}] 평균 TotalCost : {np.mean(total_costs):.4f}, 최대 TotalCost : {np.max(total_costs)}")
-    print(f"[RESULT]{index_name} Missed Keys: {len(missed_keys)} / {len(search_keys)} ({len(missed_keys) / len(search_keys) * 100:.2f}%)")
+    print(f"[{index_name}] 평균 TotalCost : {np.mean(total_costs):.4f}, 최대 TotalCost : {np.max(total_costs)}")
+    print(f"[RESULT]{index_name} Missed Keys in First Data Node: {len(missed_keys)} / {len(search_keys)} ({len(missed_keys) / len(search_keys) * 100:.2f}%)")
+    # print(f"[RESULT]{index_name} Not Found Keys: {len(not_found_keys)} / {len(search_keys)} ({len(not_found_keys) / len(search_keys) * 100:.2f}%)")
 
     return total_costs, cdf
 
