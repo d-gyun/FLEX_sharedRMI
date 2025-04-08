@@ -112,6 +112,47 @@ def benchmark_search_cost_cdf(index_name, rmi, search_keys):
 
     return total_costs, cdf
 
+def compare_search_cost_cdf(index_rmi_pairs, search_keys, x_limit=100):
+    """
+    두 개 이상의 인덱스의 Search TotalCost CDF를 하나의 plot에 출력
+    index_rmi_pairs: list of (index_name, rmi_instance)
+    """
+    plt.figure(figsize=(10, 6))
+
+    for index_name, rmi in index_rmi_pairs:
+        total_costs = []
+        missed_keys = []
+
+        for key in search_keys:
+            result = rmi.search_with_cost(key)
+            total_costs.append(result["TotalCost"])
+            if result["miss"]:
+                missed_keys.append(key)
+
+        total_costs = np.array(total_costs)
+        total_costs.sort()
+        cdf = np.arange(len(total_costs)) / len(total_costs)
+
+        # x축 고정 및 CDF 완성
+        total_costs = np.append(total_costs, x_limit)
+        cdf = np.append(cdf, 1.0)
+
+        # 계단형 CDF 라인 추가
+        plt.plot(total_costs, cdf, drawstyle='steps-post', label=f"{index_name}", linewidth=2.5)
+
+        # 로그도 미리 출력
+        print(f"[{index_name}] 평균 TotalCost : {np.mean(total_costs):.4f}")
+        print(f"[RESULT]{index_name} Missed Keys in First Data Node: {len(missed_keys)} / {len(search_keys)} ({len(missed_keys) / len(search_keys) * 100:.2f}%)")
+
+    plt.title("Search Cost CDF Comparison", fontsize=20)
+    plt.xlabel("Search Cost", fontsize=18)
+    plt.ylabel("CDF", fontsize=18)
+    plt.xlim(0, x_limit)
+    plt.grid(True)
+    plt.legend(loc="lower right", fontsize=18)  # 우측 하단
+    plt.tick_params(axis='both', which='major', labelsize=15)
+    plt.show()
+
 
 # -----------------------------
 # 실험 3: Split 발생 CDF (시간에 따른 Split 누적 수)
